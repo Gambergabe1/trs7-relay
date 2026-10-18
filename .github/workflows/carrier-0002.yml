@@ -1,0 +1,60 @@
+name: carrier-0002
+
+# Publishes the encrypted Phase 2 drop at 2026-10-24 03:14 UTC.
+# Cron can start late, so it fires early and sleeps until the exact minute.
+on:
+  schedule:
+    - cron: '40 2 24 10 *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Only check that the drop decrypts; publish nothing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency: carrier-0002
+
+jobs:
+  drop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decrypt drop
+        id: dec
+        env:
+          KEY: ${{ secrets.PHASE2_KEY }}
+        run: |
+          if [ ! -f drops/carrier-0002.tar.gz.enc ]; then echo "already dropped"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:KEY \
+            -in drops/carrier-0002.tar.gz.enc -out /tmp/drop.tgz
+          mkdir -p /tmp/drop && tar -xzf /tmp/drop.tgz -C /tmp/drop
+          find /tmp/drop -type f -printf '%P %s bytes\n'
+
+      - name: Wait for 03:13:30 UTC on 24 Oct 2026
+        if: steps.dec.outputs.skip != '1' && github.event_name == 'schedule'
+        run: |
+          target=$(date -u -d '2026-10-24 03:13:30' +%s)
+          now=$(date -u +%s)
+          if [ "$now" -lt "$target" ]; then echo "sleeping $((target - now))s"; sleep $((target - now)); fi
+
+      - name: Publish
+        if: steps.dec.outputs.skip != '1' && (github.event_name == 'schedule' || inputs.dry_run == false)
+        run: |
+          cp -r /tmp/drop/. .
+          git rm -q drops/carrier-0002.tar.gz.enc
+          git config user.name "TRS-7 RELAY"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "CARRIER 0002"
+          git push
+
+      - name: Request Pages build
+        if: steps.dec.outputs.skip != '1' && (github.event_name == 'schedule' || inputs.dry_run == false)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
