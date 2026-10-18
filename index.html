@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRS-7 RELAY</title>
+<meta name="description" content="Tidewater Relay Station 7. Carrier restored.">
+<meta property="og:title" content="TRS-7 RELAY">
+<meta property="og:description" content="Carrier lost 1987-10-17 03:14. Carrier restored 2026-10-17 03:14.">
+<meta property="og:image" content="https://gambergabe1.github.io/trs7-relay/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23050805'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%2339ff7a'/%3E%3C/svg%3E">
+<style>
+  :root { --bg:#050805; --fg:#39ff7a; --dim:#1d7a3e; --warn:#ffb347; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:16px/1.5 "Courier New", ui-monospace, monospace; }
+  body::before { content:""; position:fixed; inset:0; pointer-events:none; z-index:2;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px); }
+  body::after { content:""; position:fixed; inset:0; pointer-events:none; z-index:3;
+    background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.75)); }
+  main { max-width:760px; margin:0 auto; padding:32px 16px 80px; text-shadow:0 0 6px rgba(57,255,122,.55);
+    animation:flick 6s infinite; }
+  @keyframes flick { 0%,97%,100%{opacity:1} 98%{opacity:.82} 99%{opacity:.95} }
+  p { margin:.25em 0; white-space:pre-wrap; }
+  .dim { color:var(--dim); }
+  .warn { color:var(--warn); text-shadow:0 0 6px rgba(255,179,71,.5); }
+  .row { display:flex; gap:.5em; margin-top:1em; }
+  input { flex:1; min-width:0; background:transparent; border:0; border-bottom:1px solid var(--dim);
+    color:var(--fg); font:inherit; text-transform:uppercase; outline:none; caret-color:var(--fg);
+    text-shadow:inherit; }
+  #out { margin-top:1em; }
+  .log { border-left:2px solid var(--dim); padding-left:1em; margin:1.5em 0; }
+  .log p { white-space:normal; margin:.7em 0; }
+  .hdr { color:var(--dim); }
+  .blink { animation:blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+</style>
+</head>
+<body>
+<!-- NLS property. If found, return to Gannet Rock keeper. Do not transmit on 7.314. — R. -->
+<main>
+  <p class="dim">NORTHERN LITTORAL SURVEY // TIDEWATER RELAY STATION 7</p>
+  <p class="dim">RELAY INTERFACE v2.3 (1986)</p>
+  <p>&nbsp;</p>
+  <p>CARRIER LOST ...... 1987-10-17 03:14</p>
+  <p>CARRIER RESTORED .. 2026-10-17 03:14</p>
+  <p>&nbsp;</p>
+  <p class="warn">RELAY LOCKED. LOGS ENCRYPTED AT SOURCE.</p>
+  <p>ENTER CARRIER KEY TO RESTORE OPERATOR LOGS.</p>
+  <form class="row" id="f" autocomplete="off">
+    <label for="k">&gt;</label>
+    <input id="k" spellcheck="false" autocapitalize="characters" aria-label="Carrier key">
+  </form>
+  <div id="out" aria-live="polite"></div>
+</main>
+<script src="payload.js"></script>
+<script>
+(() => {
+  const R = window.RELAY, out = document.getElementById('out'), input = document.getElementById('k');
+  const enc = new TextEncoder();
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  let busy = false;
+
+  async function say(text, cls) {
+    const p = document.createElement('p');
+    if (cls) p.className = cls;
+    out.appendChild(p);
+    for (const ch of text) { p.textContent += ch; await sleep(18); }
+  }
+
+  async function tryKey(norm) {
+    try {
+      const base = await crypto.subtle.importKey('raw', enc.encode(norm), 'PBKDF2', false, ['deriveKey']);
+      const key = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: b64(R.s), iterations: R.it, hash: 'SHA-256' },
+        base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(R.iv) }, key, b64(R.ct));
+      return new TextDecoder().decode(pt);
+    } catch { return null; }
+  }
+
+  document.getElementById('f').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (busy) return;
+    const raw = input.value.trim();
+    const norm = raw.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!norm) return;
+    busy = true; input.value = '';
+    out.innerHTML = '';
+    await say('> ' + raw.toUpperCase(), 'dim');
+    await say('VERIFYING CARRIER KEY...', 'dim');
+    const html = await tryKey(norm);
+    if (html) {
+      await say('KEY ACCEPTED. RESTORING LOG FRAGMENTS.');
+      await sleep(600);
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      out.appendChild(div);
+      document.title = 'TRS-7 RELAY // UNLOCKED';
+    } else {
+      const h = hex(await crypto.subtle.digest('SHA-256', enc.encode('trs7:' + norm)));
+      const nudge = R.n[h];
+      if (nudge) {
+        for (const line of nudge.split('|')) { await say(line, 'warn'); await sleep(900); }
+      } else {
+        await say('KEY REJECTED. CARRIER UNSTABLE.', 'warn');
+      }
+    }
+    busy = false; input.focus();
+  });
+  input.focus();
+})();
+</script>
+</body>
+</html>
