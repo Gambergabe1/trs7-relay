@@ -45,6 +45,8 @@
   <p>&nbsp;</p>
   <p>CARRIER LOST ...... 1987-10-17 03:14</p>
   <p>CARRIER RESTORED .. 2026-10-17 03:14</p>
+  <p>CARRIER 0002 ...... 2026-10-24 03:14</p>
+  <p class="warn">CHOIR ARRAY ....... 8 OF 7 HYDROPHONES ACTIVE</p>
   <p>&nbsp;</p>
   <p class="warn">RELAY LOCKED. LOGS ENCRYPTED AT SOURCE.</p>
   <p>ENTER CARRIER KEY TO RESTORE OPERATOR LOGS.</p>
@@ -72,14 +74,17 @@
   }
 
   async function tryKey(norm) {
-    try {
-      const base = await crypto.subtle.importKey('raw', enc.encode(norm), 'PBKDF2', false, ['deriveKey']);
-      const key = await crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: b64(R.s), iterations: R.it, hash: 'SHA-256' },
-        base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
-      const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(R.iv) }, key, b64(R.ct));
-      return new TextDecoder().decode(pt);
-    } catch { return null; }
+    const base = await crypto.subtle.importKey('raw', enc.encode(norm), 'PBKDF2', false, ['deriveKey']);
+    for (const E of R.keys) {
+      try {
+        const key = await crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: b64(E.s), iterations: R.it, hash: 'SHA-256' },
+          base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+        const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(E.iv) }, key, b64(E.ct));
+        return new TextDecoder().decode(pt);
+      } catch { /* not this carrier */ }
+    }
+    return null;
   }
 
   document.getElementById('f').addEventListener('submit', async e => {
